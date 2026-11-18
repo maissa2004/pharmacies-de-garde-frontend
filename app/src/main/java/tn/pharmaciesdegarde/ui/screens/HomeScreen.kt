@@ -6,10 +6,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -18,12 +20,18 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import tn.pharmaciesdegarde.R
 import tn.pharmaciesdegarde.ui.theme.*
+import tn.pharmaciesdegarde.viewmodel.HomeViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen() {
+fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
+    // On récupère la liste des pharmacies depuis le ViewModel
+    val pharmacies by viewModel.pharmacies.collectAsStateWithLifecycle()
+
     Scaffold(
         containerColor = BackgroundLight,
         topBar = {
@@ -74,7 +82,12 @@ fun HomeScreen() {
                         .background(PrimaryBlueSoft, RoundedCornerShape(10.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.LocationOn, contentDescription = null, tint = PrimaryBlue, modifier = Modifier.size(16.dp))
+                    Icon(
+                        Icons.Default.LocationOn,
+                        contentDescription = null,
+                        tint = PrimaryBlue,
+                        modifier = Modifier.size(16.dp)
+                    )
                 }
                 Spacer(modifier = Modifier.width(10.dp))
                 Column {
@@ -111,7 +124,13 @@ fun HomeScreen() {
             ) {
                 Column {
                     Text("Pharmacies de garde · aujourd'hui", color = TextInk, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text("12 pharmacies autour de vous", color = TextMuted, fontSize = 10.sp)
+
+                    // ICI : Le texte dynamique qui affiche le nombre de pharmacies de l'API
+                    Text(
+                        text = "${pharmacies.size} pharmacies autour de vous",
+                        color = TextMuted,
+                        fontSize = 10.sp
+                    )
                 }
                 Text("Filtres", color = PrimaryBlue, fontSize = 10.sp, fontWeight = FontWeight.Bold)
             }
@@ -125,7 +144,6 @@ fun HomeScreen() {
                     .height(180.dp)
                     .background(GreenSoft, RoundedCornerShape(18.dp)) // Fond de la carte
             ) {
-                // Ici vous mettrez plus tard Google Maps Compose
                 Text(
                     text = "Simulation Carte (Google Maps)",
                     modifier = Modifier.align(Alignment.Center),
