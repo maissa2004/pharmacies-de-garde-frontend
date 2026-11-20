@@ -25,10 +25,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import tn.pharmaciesdegarde.R
 import tn.pharmaciesdegarde.ui.theme.*
 import tn.pharmaciesdegarde.viewmodel.HomeViewModel
-
+import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material3.IconButton
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
+fun HomeScreen(nom: String,onLogout: () -> Unit,viewModel: HomeViewModel = hiltViewModel()) {
     // On récupère la liste des pharmacies depuis le ViewModel
     val pharmacies by viewModel.pharmacies.collectAsStateWithLifecycle()
 
@@ -51,10 +52,9 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
                         .clip(CircleShape)
                 )
                 Spacer(modifier = Modifier.width(12.dp))
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Bonsoir, Mariem",
-                        color = TextMuted,
+                        text = if (nom.isBlank()) "Bonsoir" else "Bonsoir, $nom",                        color = TextMuted,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -63,6 +63,13 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
                         color = TextInk,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.ExtraBold
+                    )
+                }
+                IconButton(onClick = onLogout) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Logout,
+                        contentDescription = "Se déconnecter",
+                        tint = TextMuted
                     )
                 }
             }
