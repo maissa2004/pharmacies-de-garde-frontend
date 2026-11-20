@@ -20,8 +20,12 @@ class TokenStore @Inject constructor(@ApplicationContext private val context: Co
     val token: Flow<String?> = context.authDataStore.data.map { it[TOKEN] }
     val nom: Flow<String?> = context.authDataStore.data.map { it[NOM] }
 
-    suspend fun save(token: String, nom: String) {
-        context.authDataStore.edit { it[TOKEN] = token; it[NOM] = nom }
+    private val ROLE = stringPreferencesKey("role")
+    val role: Flow<String?> = context.authDataStore.data.map { it[ROLE] }
+
+
+    suspend fun save(token: String, nom: String, role: String) {
+        context.authDataStore.edit { it[TOKEN] = token; it[NOM] = nom; it[ROLE] = role }
     }
     suspend fun clear() = context.authDataStore.edit { it.clear() }
 }

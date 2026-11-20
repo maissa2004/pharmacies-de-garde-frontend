@@ -47,7 +47,7 @@ import tn.pharmaciesdegarde.viewmodel.AuthViewModel
 
 @Composable
 fun LoginScreen(
-    onSuccess: () -> Unit,
+    onSuccess: (String) -> Unit,
     onGoRegister: () -> Unit,
     viewModel: AuthViewModel = hiltViewModel()
 ) {

@@ -14,4 +14,6 @@ interface ApiService {
 
     @POST("auth/login")    suspend fun login(@Body body: LoginRequest): AuthResponse
     @POST("auth/register") suspend fun register(@Body body: RegisterRequest): AuthResponse
+    @POST("admin/pharmacies")
+    suspend fun createPharmacie(@Body body: PharmacieRequest): PharmacieDto
 }

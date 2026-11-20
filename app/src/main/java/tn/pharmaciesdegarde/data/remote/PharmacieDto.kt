@@ -14,3 +14,5 @@ data class PharmacieDto(
     val telephone: String,
     val photo: String? = null
 )
+@Serializable
+data class PharmacieRequest(val nom: String, val adresse: String, val telephone: String)

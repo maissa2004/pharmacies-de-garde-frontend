@@ -7,6 +7,7 @@ import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -20,14 +21,15 @@ class AuthViewModel @Inject constructor(private val repo: AuthRepository) : View
     private val _state = MutableStateFlow(AuthUiState())
     val state: StateFlow<AuthUiState> = _state
 
-    fun login(email: String, password: String, onSuccess: () -> Unit) {
+    // AuthViewModel
+    fun login(email: String, password: String, onSuccess: (String) -> Unit) {
         if (email.isBlank() || password.isBlank()) {
             _state.value = AuthUiState(error = "Remplissez tous les champs"); return
         }
         viewModelScope.launch {
             _state.value = AuthUiState(loading = true)
             repo.login(email, password)
-                .onSuccess { _state.value = AuthUiState(); onSuccess() }
+                .onSuccess { role -> _state.value = AuthUiState(); onSuccess(role) }
                 .onFailure { _state.value = AuthUiState(error = it.message) }
         }
     }
@@ -37,10 +39,18 @@ class AuthViewModel @Inject constructor(private val repo: AuthRepository) : View
 
 @HiltViewModel
 class SessionViewModel @Inject constructor(private val tokenStore: TokenStore) : ViewModel() {
-    val loggedIn: StateFlow<Boolean?> = tokenStore.token
-        .map { it != null }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, null) // null = chargement
+
+    val startDestination: StateFlow<String?> =
+        combine(tokenStore.token, tokenStore.role) { token, role ->
+            when {
+                token == null -> "welcome"
+                role.equals("ADMIN", ignoreCase = true) -> "admin"
+                else -> "home"
+            }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, null) // null = chargement
+
     val nom: StateFlow<String> = tokenStore.nom.map { it ?: "" }
         .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
     fun logout() = viewModelScope.launch { tokenStore.clear() }
 }
