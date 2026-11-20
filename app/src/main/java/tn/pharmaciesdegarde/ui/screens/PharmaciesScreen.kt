@@ -5,12 +5,15 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.LocalPharmacy
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -37,7 +40,9 @@ fun PharmaciesScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
-    var showForm by rememberSaveable { mutableStateOf(false) }
+    var showAdd by rememberSaveable { mutableStateOf(false) }
+    var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val editing = state.pharmacies.find { it.id == editingId }
 
     val filtered = remember(state.pharmacies, query) {
         val q = query.trim()
@@ -49,7 +54,6 @@ fun PharmaciesScreen(
 
     Scaffold(containerColor = BackgroundLight) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-            // En-tête
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour", tint = TextInk)
@@ -79,7 +83,7 @@ fun PharmaciesScreen(
             ) {
                 Text("${filtered.size} établissement(s)", color = TextMuted, fontSize = 12.sp)
                 Button(
-                    onClick = { viewModel.clearFormError(); showForm = true },
+                    onClick = { viewModel.clearFormError(); showAdd = true },
                     shape = RoundedCornerShape(12.dp),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
                 ) { Text("+ Ajouter", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
@@ -103,24 +107,37 @@ fun PharmaciesScreen(
                     modifier = Modifier.padding(16.dp)
                 )
                 else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(filtered, key = { it.id }) { PharmacieCard(it) }
+                    items(filtered, key = { it.id }) { p ->
+                        PharmacieCard(
+                            p = p,
+                            onMenuClick = { viewModel.clearFormError(); editingId = p.id }
+                        )
+                    }
                 }
             }
         }
     }
 
-    if (showForm) {
+    if (showAdd || editing != null) {
         ModalBottomSheet(
-            onDismissRequest = { showForm = false },
+            onDismissRequest = { showAdd = false; editingId = null },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = Color.White
         ) {
-            AddPharmacieForm(
+            PharmacieForm(
+                initial = editing,
                 saving = state.saving,
                 error = state.formError,
-                onClose = { showForm = false },
+                onClose = { showAdd = false; editingId = null },
                 onSubmit = { nom, adresse, tel ->
-                    viewModel.add(nom, adresse, tel) { showForm = false }
+                    if (editing != null) {
+                        viewModel.update(editing.id, nom, adresse, tel) { editingId = null }
+                    } else {
+                        viewModel.add(nom, adresse, tel) { showAdd = false }
+                    }
+                },
+                onDelete = editing?.let { e ->
+                    { viewModel.delete(e.id) { editingId = null } }
                 },
                 onTyping = viewModel::clearFormError
             )
@@ -129,13 +146,13 @@ fun PharmaciesScreen(
 }
 
 @Composable
-private fun PharmacieCard(p: PharmacieDto) {
+private fun PharmacieCard(p: PharmacieDto, onMenuClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
             .background(Color.White, RoundedCornerShape(16.dp))
             .border(1.dp, Color(0xFFE5EAF2), RoundedCornerShape(16.dp))
-            .padding(14.dp),
+            .padding(start = 14.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
@@ -148,28 +165,45 @@ private fun PharmacieCard(p: PharmacieDto) {
             Text(p.adresse, color = TextMuted, fontSize = 11.sp)
             Text(p.telephone, color = TextMuted, fontSize = 11.sp)
         }
+        IconButton(onClick = onMenuClick) {
+            Icon(Icons.Default.Menu, contentDescription = "Modifier ${p.nom}", tint = TextMuted)
+        }
     }
 }
 
 @Composable
-private fun AddPharmacieForm(
+private fun PharmacieForm(
+    initial: PharmacieDto?,            // null = ajout, non null = modification
     saving: Boolean,
     error: String?,
     onClose: () -> Unit,
     onSubmit: (String, String, String) -> Unit,
+    onDelete: (() -> Unit)?,
     onTyping: () -> Unit
 ) {
-    var nom by rememberSaveable { mutableStateOf("") }
-    var adresse by rememberSaveable { mutableStateOf("") }
-    var telephone by rememberSaveable { mutableStateOf("") }
+    val isEdit = initial != null
+    var nom by rememberSaveable(initial?.id) { mutableStateOf(initial?.nom ?: "") }
+    var adresse by rememberSaveable(initial?.id) { mutableStateOf(initial?.adresse ?: "") }
+    var telephone by rememberSaveable(initial?.id) { mutableStateOf(initial?.telephone ?: "") }
+    var confirmDelete by remember { mutableStateOf(false) }
 
-    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .imePadding()
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 24.dp)
+    ) {
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Ajouter une pharmacie", color = TextInk, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+            Text(
+                if (isEdit) "Modifier la pharmacie" else "Ajouter une pharmacie",
+                color = TextInk, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold
+            )
             IconButton(onClick = onClose) { Icon(Icons.Default.Close, contentDescription = "Fermer") }
         }
         Spacer(Modifier.height(12.dp))
@@ -200,7 +234,21 @@ private fun AddPharmacieForm(
             Text(it, color = RedClosed, fontSize = 12.sp)
         }
 
-        Spacer(Modifier.height(16.dp))
+        if (onDelete != null) {
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = { confirmDelete = true },
+                enabled = !saving,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFFDECEC),
+                    contentColor = RedClosed
+                )
+            ) { Text("Supprimer la pharmacie", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+        }
+
+        Spacer(Modifier.height(12.dp))
         Button(
             onClick = { onSubmit(nom, adresse, telephone) },
             enabled = !saving,
@@ -210,5 +258,21 @@ private fun AddPharmacieForm(
             if (saving) CircularProgressIndicator(Modifier.size(22.dp), color = Color.White, strokeWidth = 2.dp)
             else Text("Enregistrer", fontWeight = FontWeight.Bold)
         }
+    }
+
+    if (confirmDelete && onDelete != null) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Supprimer la pharmacie ?") },
+            text = { Text("Cette action est définitive.") },
+            confirmButton = {
+                TextButton(onClick = { confirmDelete = false; onDelete() }) {
+                    Text("Supprimer", color = RedClosed)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text("Annuler") }
+            }
+        )
     }
 }

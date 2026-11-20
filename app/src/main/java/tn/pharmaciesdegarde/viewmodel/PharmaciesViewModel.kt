@@ -56,4 +56,38 @@ class PharmaciesViewModel @Inject constructor(
     }
 
     fun clearFormError() { _state.value = _state.value.copy(formError = null) }
+
+
+    fun update(id: Long, nom: String, adresse: String, telephone: String, onSuccess: () -> Unit) {
+        if (nom.isBlank() || adresse.isBlank() || telephone.isBlank()) {
+            _state.value = _state.value.copy(formError = "Remplissez tous les champs"); return
+        }
+        viewModelScope.launch {
+            _state.value = _state.value.copy(saving = true, formError = null)
+            repo.update(id, nom, adresse, telephone)
+                .onSuccess { updated ->
+                    _state.value = _state.value.copy(
+                        saving = false,
+                        pharmacies = _state.value.pharmacies.map { if (it.id == updated.id) updated else it }
+                    )
+                    onSuccess()
+                }
+                .onFailure { _state.value = _state.value.copy(saving = false, formError = it.message) }
+        }
+    }
+
+    fun delete(id: Long, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(saving = true, formError = null)
+            repo.delete(id)
+                .onSuccess {
+                    _state.value = _state.value.copy(
+                        saving = false,
+                        pharmacies = _state.value.pharmacies.filter { it.id != id }
+                    )
+                    onSuccess()
+                }
+                .onFailure { _state.value = _state.value.copy(saving = false, formError = it.message) }
+        }
+    }
 }

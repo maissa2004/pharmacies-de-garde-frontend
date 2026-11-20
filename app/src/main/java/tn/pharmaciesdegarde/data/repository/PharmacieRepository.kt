@@ -29,4 +29,10 @@ class PharmacieRepository @Inject constructor(
     } catch (e: IOException) {
         Result.failure(Exception("Impossible de joindre le serveur"))
     }
+
+
+    suspend fun update(id: Long, nom: String, adresse: String, telephone: String): Result<PharmacieDto> =
+        safe { api.updatePharmacie(id, PharmacieRequest(nom.trim(), adresse.trim(), telephone.trim())) }
+
+    suspend fun delete(id: Long): Result<Unit> = safe { api.deletePharmacie(id) }
 }
