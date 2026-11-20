@@ -31,7 +31,16 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import tn.pharmaciesdegarde.data.remote.PharmacieDto
 import tn.pharmaciesdegarde.ui.theme.*
 import tn.pharmaciesdegarde.viewmodel.PharmaciesViewModel
-
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.platform.LocalFocusManager
+import java.text.Normalizer
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextAlign
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PharmaciesScreen(
@@ -44,12 +53,31 @@ fun PharmaciesScreen(
     var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
     val editing = state.pharmacies.find { it.id == editingId }
 
-    val filtered = remember(state.pharmacies, query) {
-        val q = query.trim()
-        if (q.isEmpty()) state.pharmacies
-        else state.pharmacies.filter {
-            it.nom.contains(q, true) || it.adresse.contains(q, true) || it.ville.contains(q, true)
-        }
+    val focusManager = LocalFocusManager.current
+    val listState = rememberLazyListState()
+
+    val indexed = remember(state.pharmacies) {
+        state.pharmacies.map { it to it.searchText() }
+    }
+    val filtered = remember(indexed, query) {
+        val tokens = query.normalized().split(" ").filter { it.isNotEmpty() }
+        if (tokens.isEmpty()) state.pharmacies
+        else indexed.filter { (_, text) -> tokens.all { it in text } }.map { it.first }
+    }
+    val searching = query.isNotBlank()
+
+    var page by rememberSaveable { mutableIntStateOf(0) }
+    val totalPages = maxOf(1, (filtered.size + PAGE_SIZE - 1) / PAGE_SIZE)
+    val currentPage = page.coerceIn(0, totalPages - 1)   // évite une page vide après une suppression
+    val pageItems = remember(filtered, currentPage) {
+        filtered.drop(currentPage * PAGE_SIZE).take(PAGE_SIZE)
+    }
+    val from = if (filtered.isEmpty()) 0 else currentPage * PAGE_SIZE + 1
+    val to = minOf((currentPage + 1) * PAGE_SIZE, filtered.size)
+
+// remonte en haut quand on change de page ou de recherche
+    LaunchedEffect(query, currentPage) {
+        listState.scrollToItem(0)
     }
 
     Scaffold(containerColor = BackgroundLight) { padding ->
@@ -66,14 +94,22 @@ fun PharmaciesScreen(
 
             OutlinedTextField(
                 value = query,
-                onValueChange = { query = it },
-                placeholder = { Text("Nom, ville ou numéro d'ordre") },
+                onValueChange = { query = it; page = 0 },
+                placeholder = { Text("Nom, ville ou téléphone") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { query = ""; page = 0 }) {
+                            Icon(Icons.Default.Close, contentDescription = "Effacer la recherche")
+                        }
+                    }
+                },
                 singleLine = true,
                 shape = RoundedCornerShape(16.dp),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
                 modifier = Modifier.fillMaxWidth()
             )
-
             Spacer(Modifier.height(12.dp))
 
             Row(
@@ -81,7 +117,14 @@ fun PharmaciesScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("${filtered.size} établissement(s)", color = TextMuted, fontSize = 12.sp)
+                Text(
+                    when {
+                        searching -> "${filtered.size} résultat(s) sur ${state.pharmacies.size}"
+                        totalPages > 1 -> "$from–$to sur ${filtered.size}"
+                        else -> "${filtered.size} établissement(s)"
+                    },
+                    color = TextMuted, fontSize = 12.sp
+                )
                 Button(
                     onClick = { viewModel.clearFormError(); showAdd = true },
                     shape = RoundedCornerShape(12.dp),
@@ -103,20 +146,31 @@ fun PharmaciesScreen(
                     TextButton(onClick = viewModel::load) { Text("Réessayer") }
                 }
                 filtered.isEmpty() -> Text(
-                    "Aucune pharmacie", color = TextMuted, fontSize = 13.sp,
+                    if (searching) "Aucun résultat pour « ${query.trim()} »" else "Aucune pharmacie",
+                    color = TextMuted, fontSize = 13.sp,
                     modifier = Modifier.padding(16.dp)
                 )
-                else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(filtered, key = { it.id }) { p ->
+                else -> LazyColumn(
+                    state = listState,
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(pageItems, key = { it.id }) { p ->
                         PharmacieCard(
                             p = p,
                             onMenuClick = { viewModel.clearFormError(); editingId = p.id }
                         )
                     }
                 }
+            }   // ← fin du when
+
+            if (!state.loading && state.error == null && totalPages > 1) {
+                PaginationBar(current = currentPage, total = totalPages, onPage = { page = it })
             }
-        }
-    }
+        }   // ← fin de la Column
+    }       // ← fin du Scaffold
+
+
 
     if (showAdd || editing != null) {
         ModalBottomSheet(
@@ -130,12 +184,14 @@ fun PharmaciesScreen(
                 error = state.formError,
                 onClose = { showAdd = false; editingId = null },
                 onSubmit = { nom, adresse, tel ->
-                    if (editing != null) {
-                        viewModel.update(editing.id, nom, adresse, tel) { editingId = null }
-                    } else {
-                        viewModel.add(nom, adresse, tel) { showAdd = false }
-                    }
-                },
+                        if (editing != null) {
+                            viewModel.update(editing.id, nom, adresse, tel) { editingId = null }
+                        } else {
+                            viewModel.add(nom, adresse, tel) {
+                                showAdd = false; query = ""; page = 0
+                            }
+                        }
+                    },
                 onDelete = editing?.let { e ->
                     { viewModel.delete(e.id) { editingId = null } }
                 },
@@ -274,5 +330,96 @@ private fun PharmacieForm(
                 TextButton(onClick = { confirmDelete = false }) { Text("Annuler") }
             }
         )
+    }
+
+
+}
+private val DIACRITICS = Regex("\\p{InCombiningDiacriticalMarks}+")
+
+// minuscules + sans accents + sans espaces aux extrémités
+private fun String.normalized(): String =
+    Normalizer.normalize(this, Normalizer.Form.NFD)
+        .replace(DIACRITICS, "")
+        .lowercase()
+        .trim()
+
+// tout ce qui est cherchable dans une pharmacie, calculé une seule fois par pharmacie
+private fun PharmacieDto.searchText(): String =
+    listOf(nom, adresse, ville, gouvernorat, telephone, telephone.replace(" ", ""))
+        .joinToString(" ")
+        .normalized()
+
+private const val PAGE_SIZE = 10
+
+@Composable
+private fun PaginationBar(current: Int, total: Int, onPage: (Int) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        PageButton(
+            icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+            description = "Page précédente",
+            enabled = current > 0,
+            onClick = { onPage(current - 1) }
+        )
+        pageWindow(current, total).forEach { p ->
+            if (p == null) {
+                Text(
+                    "…", color = TextMuted, fontSize = 12.sp,
+                    textAlign = TextAlign.Center, modifier = Modifier.width(16.dp)
+                )
+            } else {
+                PageButton(label = "${p + 1}", selected = p == current, onClick = { onPage(p) })
+            }
+        }
+        PageButton(
+            icon = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            description = "Page suivante",
+            enabled = current < total - 1,
+            onClick = { onPage(current + 1) }
+        )
+    }
+}
+
+@Composable
+private fun PageButton(
+    label: String? = null,
+    icon: ImageVector? = null,
+    description: String? = null,
+    selected: Boolean = false,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    val contentColor = when {
+        selected -> Color.White
+        enabled -> TextInk
+        else -> TextMuted.copy(alpha = 0.4f)
+    }
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (selected) PrimaryBlue else Color.White)
+            .border(1.dp, if (selected) PrimaryBlue else BorderLine, RoundedCornerShape(10.dp))
+            .clickable(enabled = enabled && !selected, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        if (icon != null) {
+            Icon(icon, contentDescription = description, tint = contentColor, modifier = Modifier.size(18.dp))
+        } else {
+            Text(label ?: "", color = contentColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+// Toujours 7 emplacements max : 1 … 4 5 6 … 49 (null = « … »)
+private fun pageWindow(current: Int, total: Int): List<Int?> {
+    if (total <= 7) return (0 until total).toList()
+    return when {
+        current <= 3 -> listOf(0, 1, 2, 3, 4, null, total - 1)
+        current >= total - 4 -> listOf(0, null) + (total - 5 until total).toList()
+        else -> listOf(0, null, current - 1, current, current + 1, null, total - 1)
     }
 }
