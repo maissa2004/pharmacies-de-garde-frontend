@@ -7,8 +7,12 @@ import kotlinx.serialization.json.Json
 import retrofit2.HttpException
 import tn.pharmaciesdegarde.data.remote.ApiService
 import tn.pharmaciesdegarde.data.remote.ErrorResponse
+import tn.pharmaciesdegarde.data.remote.GeocodeRequest
+import tn.pharmaciesdegarde.data.remote.GeocodeResponse
 import tn.pharmaciesdegarde.data.remote.PharmacieDto
 import tn.pharmaciesdegarde.data.remote.PharmacieRequest
+import tn.pharmaciesdegarde.data.remote.PharmacieUpdateRequest
+import tn.pharmaciesdegarde.data.remote.ReverseGeocodeResponse
 
 @Singleton
 class PharmacieRepository @Inject constructor(
@@ -17,9 +21,17 @@ class PharmacieRepository @Inject constructor(
 ) {
     suspend fun list(): Result<List<PharmacieDto>> = safe { api.getPharmacies() }
 
-    suspend fun create(nom: String, adresse: String, telephone: String): Result<PharmacieDto> =
-        safe { api.createPharmacie(PharmacieRequest(nom.trim(), adresse.trim(), telephone.trim())) }
-
+    suspend fun create(
+        nom: String, adresse: String, ville: String, gouvernorat: String,
+        telephone: String, latitude: Double, longitude: Double
+    ): Result<PharmacieDto> = safe {
+        api.createPharmacie(
+            PharmacieRequest(
+                nom.trim(), adresse.trim(), telephone.trim(),
+                ville.trim(), gouvernorat.trim(), latitude, longitude
+            )
+        )
+    }
     private suspend fun <T> safe(block: suspend () -> T): Result<T> = try {
         Result.success(block())
     } catch (e: HttpException) {
@@ -32,7 +44,14 @@ class PharmacieRepository @Inject constructor(
 
 
     suspend fun update(id: Long, nom: String, adresse: String, telephone: String): Result<PharmacieDto> =
-        safe { api.updatePharmacie(id, PharmacieRequest(nom.trim(), adresse.trim(), telephone.trim())) }
+        safe { api.updatePharmacie(id,
+            PharmacieUpdateRequest(nom.trim(), adresse.trim(), telephone.trim())
+        ) }
 
+    suspend fun geocode(adresse: String, ville: String, gouvernorat: String): Result<GeocodeResponse> =
+        safe { api.geocode(GeocodeRequest(adresse.trim(), ville.trim(), gouvernorat.trim())) }
     suspend fun delete(id: Long): Result<Unit> = safe { api.deletePharmacie(id) }
+
+    suspend fun reverseGeocode(lat: Double, lng: Double): Result<ReverseGeocodeResponse> =
+        safe { api.reverseGeocode(lat, lng) }
 }

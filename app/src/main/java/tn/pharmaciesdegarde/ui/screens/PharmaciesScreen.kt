@@ -41,6 +41,9 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.material.icons.filled.MyLocation
+import tn.pharmaciesdegarde.viewmodel.GeoState
+import androidx.compose.ui.platform.LocalFocusManager
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PharmaciesScreen(
@@ -126,7 +129,7 @@ fun PharmaciesScreen(
                     color = TextMuted, fontSize = 12.sp
                 )
                 Button(
-                    onClick = { viewModel.clearFormError(); showAdd = true },
+                    onClick = { viewModel.clearFormError(); viewModel.resetGeo(); showAdd = true },
                     shape = RoundedCornerShape(12.dp),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
                 ) { Text("+ Ajouter", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
@@ -182,19 +185,20 @@ fun PharmaciesScreen(
                 initial = editing,
                 saving = state.saving,
                 error = state.formError,
+                geo = state.geo,
                 onClose = { showAdd = false; editingId = null },
-                onSubmit = { nom, adresse, tel ->
-                        if (editing != null) {
-                            viewModel.update(editing.id, nom, adresse, tel) { editingId = null }
-                        } else {
-                            viewModel.add(nom, adresse, tel) {
-                                showAdd = false; query = ""; page = 0
-                            }
+                onGeocode = viewModel::geocode,
+                onPositionChanged = viewModel::setPosition,
+                onSubmit = { nom, adresse, ville, gouvernorat, tel ->
+                    if (editing != null) {
+                        viewModel.update(editing.id, nom, adresse, tel) { editingId = null }
+                    } else {
+                        viewModel.add(nom, adresse, ville, gouvernorat, tel) {
+                            showAdd = false; query = ""; page = 0
                         }
-                    },
-                onDelete = editing?.let { e ->
-                    { viewModel.delete(e.id) { editingId = null } }
+                    }
                 },
+                onDelete = editing?.let { e -> { viewModel.delete(e.id) { editingId = null } } },
                 onTyping = viewModel::clearFormError
             )
         }
@@ -227,22 +231,62 @@ private fun PharmacieCard(p: PharmacieDto, onMenuClick: () -> Unit) {
     }
 }
 
+private val GOUVERNORATS = listOf(
+    "Ariana", "Béja", "Ben Arous", "Bizerte", "Gabès", "Gafsa", "Jendouba", "Kairouan",
+    "Kasserine", "Kébili", "Le Kef", "Mahdia", "Manouba", "Médenine", "Monastir", "Nabeul",
+    "Sfax", "Sidi Bouzid", "Siliana", "Sousse", "Tataouine", "Tozeur", "Tunis", "Zaghouan"
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GouvernoratDropdown(value: String, onSelected: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = value, onValueChange = {}, readOnly = true,
+            label = { Text("Gouvernorat") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier = Modifier.menuAnchor().fillMaxWidth()
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            GOUVERNORATS.forEach { g ->
+                DropdownMenuItem(text = { Text(g) }, onClick = { onSelected(g); expanded = false })
+            }
+        }
+    }
+}
+
 @Composable
 private fun PharmacieForm(
     initial: PharmacieDto?,            // null = ajout, non null = modification
     saving: Boolean,
     error: String?,
+    geo: GeoState,
     onClose: () -> Unit,
-    onSubmit: (String, String, String) -> Unit,
+    onGeocode: (String, String, String) -> Unit,
+    onPositionChanged: (Double, Double) -> Unit,
+    onSubmit: (String, String, String, String, String) -> Unit,
     onDelete: (() -> Unit)?,
     onTyping: () -> Unit
 ) {
     val isEdit = initial != null
+    val focusManager = LocalFocusManager.current
     var nom by rememberSaveable(initial?.id) { mutableStateOf(initial?.nom ?: "") }
     var adresse by rememberSaveable(initial?.id) { mutableStateOf(initial?.adresse ?: "") }
+    var ville by rememberSaveable(initial?.id) { mutableStateOf(initial?.ville ?: "") }
+    var gouvernorat by rememberSaveable(initial?.id) { mutableStateOf(initial?.gouvernorat ?: "") }
     var telephone by rememberSaveable(initial?.id) { mutableStateOf(initial?.telephone ?: "") }
     var confirmDelete by remember { mutableStateOf(false) }
 
+    // Quand la carte renvoie une adresse, on remplit le formulaire (sans écraser avec du vide)
+    LaunchedEffect(geo.fill) {
+        if (isEdit) return@LaunchedEffect   // la modification n'utilise pas la carte
+        geo.fill?.let {
+            if (it.adresse.isNotBlank()) adresse = it.adresse
+            if (it.ville.isNotBlank()) ville = it.ville
+            if (it.gouvernorat.isNotBlank()) gouvernorat = it.gouvernorat
+        }
+    }
     Column(
         Modifier
             .fillMaxWidth()
@@ -273,10 +317,22 @@ private fun PharmacieForm(
         Spacer(Modifier.height(10.dp))
         OutlinedTextField(
             value = adresse, onValueChange = { adresse = it; onTyping() },
-            label = { Text("Adresse") }, placeholder = { Text("Rue, ville, gouvernorat") },
+            label = { Text("Adresse") }, placeholder = { Text("Rue, numéro, quartier") },
             singleLine = true, modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)
         )
+
+        if (!isEdit) {
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(
+                value = ville, onValueChange = { ville = it; onTyping() },
+                label = { Text("Ville") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)
+            )
+            Spacer(Modifier.height(10.dp))
+            GouvernoratDropdown(value = gouvernorat, onSelected = { gouvernorat = it; onTyping() })
+        }
+
         Spacer(Modifier.height(10.dp))
         OutlinedTextField(
             value = telephone, onValueChange = { telephone = it; onTyping() },
@@ -284,6 +340,47 @@ private fun PharmacieForm(
             singleLine = true, modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Done)
         )
+
+        // --- Localisation (ajout uniquement : le backend ne modifie pas la position) ---
+        if (!isEdit) {
+            Spacer(Modifier.height(14.dp))
+            OutlinedButton(
+                onClick = { focusManager.clearFocus(); onGeocode(adresse, ville, gouvernorat) },
+                enabled = !geo.loading && !saving,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                if (geo.loading) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Localiser sur la carte", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            geo.message?.let {
+                Spacer(Modifier.height(6.dp))
+                Text(it, color = if (geo.lat != null) TextMuted else RedClosed, fontSize = 12.sp)
+            }
+
+            Spacer(Modifier.height(8.dp))
+            PharmacieMapPicker(
+                focus = geo.focus,
+                onPositionChanged = onPositionChanged,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(260.dp)
+                    .border(1.dp, Color(0xFFE5EAF2), RoundedCornerShape(16.dp))
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                if (geo.lat != null && geo.lng != null)
+                    "Position validée : %.5f, %.5f".format(geo.lat, geo.lng)
+                else "Aucune position choisie : touchez la carte ou utilisez « Localiser »",
+                color = TextMuted, fontSize = 11.sp
+            )
+        }
 
         error?.let {
             Spacer(Modifier.height(8.dp))
@@ -306,7 +403,7 @@ private fun PharmacieForm(
 
         Spacer(Modifier.height(12.dp))
         Button(
-            onClick = { onSubmit(nom, adresse, telephone) },
+            onClick = { onSubmit(nom, adresse, ville, gouvernorat, telephone) },
             enabled = !saving,
             modifier = Modifier.fillMaxWidth().height(52.dp),
             shape = RoundedCornerShape(16.dp)
@@ -326,13 +423,9 @@ private fun PharmacieForm(
                     Text("Supprimer", color = RedClosed)
                 }
             },
-            dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) { Text("Annuler") }
-            }
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Annuler") } }
         )
     }
-
-
 }
 private val DIACRITICS = Regex("\\p{InCombiningDiacriticalMarks}+")
 

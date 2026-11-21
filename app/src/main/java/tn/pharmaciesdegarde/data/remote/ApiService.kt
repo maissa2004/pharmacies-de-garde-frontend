@@ -21,8 +21,17 @@ interface ApiService {
     suspend fun createPharmacie(@Body body: PharmacieRequest): PharmacieDto
 
     @PUT("admin/pharmacies/{id}")
-    suspend fun updatePharmacie(@Path("id") id: Long, @Body body: PharmacieRequest): PharmacieDto
+    suspend fun updatePharmacie(@Path("id") id: Long, @Body body: PharmacieUpdateRequest): PharmacieDto
 
+    @POST("admin/pharmacies/geocode")
+    suspend fun geocode(@Body body: GeocodeRequest): GeocodeResponse
     @DELETE("admin/pharmacies/{id}")
     suspend fun deletePharmacie(@Path("id") id: Long)
+
+
+    @GET("admin/pharmacies/reverse-geocode")
+    suspend fun reverseGeocode(
+        @Query("lat") lat: Double,
+        @Query("lng") lng: Double
+    ): ReverseGeocodeResponse
 }
