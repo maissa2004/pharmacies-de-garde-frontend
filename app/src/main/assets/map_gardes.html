@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        html, body { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; }
+        #map { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+               min-height: 150px; background: #cfe8ff; }
+        #legend { position: absolute; left: 8px; bottom: 8px; z-index: 1000; background: #fff;
+                  padding: 4px 8px; border-radius: 8px; font: 11px sans-serif;
+                  box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+        #legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
+    </style>
+</head>
+<body>
+<div id="map"></div>
+<div id="legend">
+    <i style="background:#16a34a"></i>En cours &nbsp;
+    <i style="background:#f59e0b"></i>Plus tard
+</div>
+<script>
+    const map = L.map('map', { zoomControl: false }).setView([36.8065, 10.1815], 11);
+
+ function fixSize() {
+    const h = window.innerHeight || document.documentElement.clientHeight;
+    document.getElementById('map').style.height = h + 'px';
+    map.invalidateSize();
+}
+window.addEventListener('resize', fixSize);
+if (window.ResizeObserver) new ResizeObserver(fixSize).observe(document.documentElement);
+[100, 300, 800, 1500, 3000].forEach(t => setTimeout(fixSize, t));
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19, attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    const layer = L.layerGroup().addTo(map);
+
+    function icon(color) {
+        return L.divIcon({
+            className: '',
+            html: '<div style="width:22px;height:22px;border-radius:50%;background:' + color +
+                  ';border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>',
+            iconSize: [22, 22], iconAnchor: [11, 11]
+        });
+    }
+
+    // Appelée par Kotlin : items = [{id, nom, lat, lng, ongoing}]
+    function setPharmacies(items) {
+        layer.clearLayers();
+        const pts = [];
+        items.forEach(p => {
+            if (p.lat == null || p.lng == null) return;
+            const m = L.marker([p.lat, p.lng], { icon: icon(p.ongoing ? '#16a34a' : '#f59e0b') }).addTo(layer);
+            m.bindTooltip(p.nom + (p.ongoing ? ' · de garde' : ' · plus tard'));
+            m.on('click', () => Android.onMarkerClick(p.id));
+            pts.push([p.lat, p.lng]);
+        });
+        if (pts.length === 1) map.setView(pts[0], 15);
+        else if (pts.length > 1) map.fitBounds(pts, { padding: [20, 20], maxZoom: 16 });
+    }
+</script>
+</body>
+</html>

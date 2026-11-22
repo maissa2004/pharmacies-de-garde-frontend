@@ -34,4 +34,8 @@ interface ApiService {
         @Query("lat") lat: Double,
         @Query("lng") lng: Double
     ): ReverseGeocodeResponse
+    @GET("gardes")
+    suspend fun getGardes(@Query("gouvernorat") gouvernorat: String? = null): List<GardeDto>
+    @POST("admin/gardes")
+    suspend fun createGarde(@Body body: GardeRequest): GardeDto
 }

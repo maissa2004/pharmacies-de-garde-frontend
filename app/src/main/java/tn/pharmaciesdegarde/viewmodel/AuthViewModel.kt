@@ -33,7 +33,17 @@ class AuthViewModel @Inject constructor(private val repo: AuthRepository) : View
                 .onFailure { _state.value = AuthUiState(error = it.message) }
         }
     }
-    // register(nom, email, password, onSuccess) : même schéma avec repo.register
+    fun register(nom: String, email: String, password: String, onSuccess: (String) -> Unit) {
+        if (nom.isBlank() || email.isBlank() || password.isBlank()) {
+            _state.value = AuthUiState(error = "Remplissez tous les champs"); return
+        }
+        viewModelScope.launch {
+            _state.value = AuthUiState(loading = true)
+            repo.register(nom, email, password)
+                .onSuccess { role -> _state.value = AuthUiState(); onSuccess(role) }
+                .onFailure { _state.value = AuthUiState(error = it.message) }
+        }
+    }
     fun clearError() { _state.value = _state.value.copy(error = null) }
 }
 

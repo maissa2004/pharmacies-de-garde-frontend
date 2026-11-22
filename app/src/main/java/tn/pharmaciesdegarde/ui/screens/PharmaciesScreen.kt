@@ -83,18 +83,11 @@ fun PharmaciesScreen(
         listState.scrollToItem(0)
     }
 
-    Scaffold(containerColor = BackgroundLight) { padding ->
+    Scaffold(
+        containerColor = BackgroundLight,
+        topBar = { AdminHeader(title = "Pharmacies", onBack = onBack) }
+    ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour", tint = TextInk)
-                }
-                Spacer(Modifier.width(8.dp))
-                Text("Pharmacies", color = TextInk, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
-            }
-
-            Spacer(Modifier.height(16.dp))
-
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it; page = 0 },
@@ -231,7 +224,7 @@ private fun PharmacieCard(p: PharmacieDto, onMenuClick: () -> Unit) {
     }
 }
 
-private val GOUVERNORATS = listOf(
+internal val GOUVERNORATS = listOf(
     "Ariana", "Béja", "Ben Arous", "Bizerte", "Gabès", "Gafsa", "Jendouba", "Kairouan",
     "Kasserine", "Kébili", "Le Kef", "Mahdia", "Manouba", "Médenine", "Monastir", "Nabeul",
     "Sfax", "Sidi Bouzid", "Siliana", "Sousse", "Tataouine", "Tozeur", "Tunis", "Zaghouan"
