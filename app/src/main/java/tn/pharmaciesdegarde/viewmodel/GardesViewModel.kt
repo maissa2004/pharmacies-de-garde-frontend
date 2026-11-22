@@ -19,8 +19,12 @@ import tn.pharmaciesdegarde.data.repository.PharmacieRepository
 import java.time.LocalDate
 
 const val ALL_REGIONS = "Toutes les régions"
+const val DEFAULT_REGION = "Tunis"
+
+data class UserLocation(val lat: Double, val lng: Double)
 data class GardesUiState(
-    val gouvernorat: String = "Tunis",
+    val gouvernorat: String = DEFAULT_REGION,
+    val userLocation: UserLocation? = null,
     val date: LocalDate? = null,
     val loading: Boolean = true,
     val gardes: List<GardeDto> = emptyList(),
@@ -104,4 +108,10 @@ class GardesViewModel @Inject constructor(
     fun clearFormError() { _state.update { it.copy(formError = null) } }
 
     fun selectDate(d: LocalDate?) { _state.update { it.copy(date = d) } }
+
+    fun setUserLocation(lat: Double, lng: Double) {
+        _state.update { it.copy(userLocation = UserLocation(lat, lng)) }
+    }
+
+    fun clearUserLocation() { _state.update { it.copy(userLocation = null) } }
 }

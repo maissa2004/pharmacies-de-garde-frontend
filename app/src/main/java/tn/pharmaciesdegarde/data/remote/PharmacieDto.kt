@@ -26,7 +26,13 @@ data class PharmacieRequest(
 )
 
 @Serializable
-data class PharmacieUpdateRequest(val nom: String, val adresse: String, val telephone: String)
+data class PharmacieUpdateRequest(
+    val nom: String,
+    val adresse: String,
+    val telephone: String,
+    val latitude: Double? = null,
+    val longitude: Double? = null
+)
 
 @Serializable
 data class GeocodeRequest(val adresse: String, val ville: String, val gouvernorat: String)

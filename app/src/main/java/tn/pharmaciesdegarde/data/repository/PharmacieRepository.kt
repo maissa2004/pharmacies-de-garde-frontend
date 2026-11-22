@@ -43,11 +43,17 @@ class PharmacieRepository @Inject constructor(
     }
 
 
-    suspend fun update(id: Long, nom: String, adresse: String, telephone: String): Result<PharmacieDto> =
-        safe { api.updatePharmacie(id,
-            PharmacieUpdateRequest(nom.trim(), adresse.trim(), telephone.trim())
-        ) }
-
+    suspend fun update(
+        id: Long, nom: String, adresse: String, telephone: String,
+        latitude: Double? = null, longitude: Double? = null
+    ): Result<PharmacieDto> = safe {
+        api.updatePharmacie(
+            id,
+            PharmacieUpdateRequest(
+                nom.trim(), adresse.trim(), telephone.trim(), latitude, longitude
+            )
+        )
+    }
     suspend fun geocode(adresse: String, ville: String, gouvernorat: String): Result<GeocodeResponse> =
         safe { api.geocode(GeocodeRequest(adresse.trim(), ville.trim(), gouvernorat.trim())) }
     suspend fun delete(id: Long): Result<Unit> = safe { api.deletePharmacie(id) }

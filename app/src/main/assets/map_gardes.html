@@ -19,19 +19,21 @@
 <div id="map"></div>
 <div id="legend">
     <i style="background:#16a34a"></i>En cours &nbsp;
-    <i style="background:#f59e0b"></i>Plus tard
+    <i style="background:#f59e0b"></i>Plus tard &nbsp;
+    <i style="background:#2563eb"></i>Vous
 </div>
 <script>
+    const GREEN = '#16a34a', ORANGE = '#f59e0b', BLUE = '#2563eb';
     const map = L.map('map', { zoomControl: false }).setView([36.8065, 10.1815], 11);
 
- function fixSize() {
-    const h = window.innerHeight || document.documentElement.clientHeight;
-    document.getElementById('map').style.height = h + 'px';
-    map.invalidateSize();
-}
-window.addEventListener('resize', fixSize);
-if (window.ResizeObserver) new ResizeObserver(fixSize).observe(document.documentElement);
-[100, 300, 800, 1500, 3000].forEach(t => setTimeout(fixSize, t));
+    function fixSize() {
+        const h = window.innerHeight || document.documentElement.clientHeight;
+        document.getElementById('map').style.height = h + 'px';
+        map.invalidateSize();
+    }
+    window.addEventListener('resize', fixSize);
+    if (window.ResizeObserver) new ResizeObserver(fixSize).observe(document.documentElement);
+    [100, 300, 800, 1500, 3000].forEach(t => setTimeout(fixSize, t));
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19, attribution: '© OpenStreetMap'
@@ -48,19 +50,57 @@ if (window.ResizeObserver) new ResizeObserver(fixSize).observe(document.document
         });
     }
 
-    // Appelée par Kotlin : items = [{id, nom, lat, lng, ongoing}]
-    function setPharmacies(items) {
+    function distanceText(km) {
+        return km < 1 ? (Math.round(km * 100) * 10) + ' m'
+                      : km.toFixed(1).replace('.', ',') + ' km';
+    }
+
+    // Bulle construite avec textContent : un nom avec des caractères spéciaux reste sûr
+    function popupFor(p) {
+        const box = document.createElement('div');
+        const title = document.createElement('b');
+        title.textContent = p.nom;
+        box.appendChild(title);
+        const info = document.createElement('div');
+        info.textContent = (p.ongoing ? 'Ouverte maintenant' : 'Garde plus tard') +
+                           (p.km != null ? ' · ' + distanceText(p.km) : '');
+        box.appendChild(info);
+        const link = document.createElement('a');
+        link.href = '#';
+        link.textContent = 'Voir la fiche ›';
+        link.style.fontWeight = 'bold';
+        link.addEventListener('click', e => { e.preventDefault(); Android.onMarkerClick(p.id); });
+        box.appendChild(link);
+        return box;
+    }
+
+    // Appelée par Kotlin : { points: [{id, nom, lat, lng, ongoing, km?}], user?: {lat, lng} }
+    function setData(data) {
         layer.clearLayers();
-        const pts = [];
-        items.forEach(p => {
-            if (p.lat == null || p.lng == null) return;
-            const m = L.marker([p.lat, p.lng], { icon: icon(p.ongoing ? '#16a34a' : '#f59e0b') }).addTo(layer);
-            m.bindTooltip(p.nom + (p.ongoing ? ' · de garde' : ' · plus tard'));
-            m.on('click', () => Android.onMarkerClick(p.id));
-            pts.push([p.lat, p.lng]);
+        const pts = data.points || [];
+
+        pts.forEach(p => {
+            L.marker([p.lat, p.lng], { icon: icon(p.ongoing ? GREEN : ORANGE) })
+                .bindPopup(popupFor(p)).addTo(layer);
         });
-        if (pts.length === 1) map.setView(pts[0], 15);
-        else if (pts.length > 1) map.fitBounds(pts, { padding: [20, 20], maxZoom: 16 });
+
+let focus = pts.filter(p => p.focus !== false).map(p => [p.lat, p.lng]);
+        if (data.user) {
+            const u = [data.user.lat, data.user.lng];
+            L.circleMarker(u, { radius: 18, stroke: false, fillColor: BLUE,
+                                fillOpacity: 0.18, interactive: false }).addTo(layer);
+            L.circleMarker(u, { radius: 8, color: '#fff', weight: 3,
+                                fillColor: BLUE, fillOpacity: 1 })
+                .bindTooltip('Vous êtes ici').addTo(layer);
+
+            // On cadre l'utilisateur et les 5 pharmacies les plus proches
+const nearest = pts.filter(p => p.km != null && p.focus !== false)
+    .sort((a, b) => a.km - b.km).slice(0, 5).map(p => [p.lat, p.lng]);
+            focus = [u].concat(nearest);
+        }
+
+        if (focus.length === 1) map.setView(focus[0], 15);
+        else if (focus.length > 1) map.fitBounds(focus, { padding: [30, 30], maxZoom: 16 });
     }
 </script>
 </body>

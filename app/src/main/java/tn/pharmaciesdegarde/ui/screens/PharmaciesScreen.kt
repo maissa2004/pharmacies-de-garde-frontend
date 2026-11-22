@@ -44,6 +44,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material.icons.filled.MyLocation
 import tn.pharmaciesdegarde.viewmodel.GeoState
 import androidx.compose.ui.platform.LocalFocusManager
+import tn.pharmaciesdegarde.viewmodel.MapFocus
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PharmaciesScreen(
@@ -154,7 +156,7 @@ fun PharmaciesScreen(
                     items(pageItems, key = { it.id }) { p ->
                         PharmacieCard(
                             p = p,
-                            onMenuClick = { viewModel.clearFormError(); editingId = p.id }
+                            onMenuClick = { viewModel.clearFormError(); viewModel.resetGeo(); editingId = p.id }
                         )
                     }
                 }
@@ -184,7 +186,10 @@ fun PharmaciesScreen(
                 onPositionChanged = viewModel::setPosition,
                 onSubmit = { nom, adresse, ville, gouvernorat, tel ->
                     if (editing != null) {
-                        viewModel.update(editing.id, nom, adresse, tel) { editingId = null }
+                        viewModel.update(
+                            editing.id, nom, adresse, tel,
+                            state.geo.lat, state.geo.lng
+                        ) { editingId = null }
                     } else {
                         viewModel.add(nom, adresse, ville, gouvernorat, tel) {
                             showAdd = false; query = ""; page = 0
@@ -273,11 +278,13 @@ private fun PharmacieForm(
 
     // Quand la carte renvoie une adresse, on remplit le formulaire (sans écraser avec du vide)
     LaunchedEffect(geo.fill) {
-        if (isEdit) return@LaunchedEffect   // la modification n'utilise pas la carte
         geo.fill?.let {
             if (it.adresse.isNotBlank()) adresse = it.adresse
-            if (it.ville.isNotBlank()) ville = it.ville
-            if (it.gouvernorat.isNotBlank()) gouvernorat = it.gouvernorat
+            // ville et gouvernorat sont cachés en modification et ne sont pas envoyés
+            if (!isEdit) {
+                if (it.ville.isNotBlank()) ville = it.ville
+                if (it.gouvernorat.isNotBlank()) gouvernorat = it.gouvernorat
+            }
         }
     }
     Column(
@@ -314,7 +321,6 @@ private fun PharmacieForm(
             singleLine = true, modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)
         )
-
         if (!isEdit) {
             Spacer(Modifier.height(10.dp))
             OutlinedTextField(
@@ -333,47 +339,57 @@ private fun PharmacieForm(
             singleLine = true, modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Done)
         )
-
-        // --- Localisation (ajout uniquement : le backend ne modifie pas la position) ---
-        if (!isEdit) {
-            Spacer(Modifier.height(14.dp))
-            OutlinedButton(
-                onClick = { focusManager.clearFocus(); onGeocode(adresse, ville, gouvernorat) },
-                enabled = !geo.loading && !saving,
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                shape = RoundedCornerShape(14.dp)
-            ) {
-                if (geo.loading) {
-                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Localiser sur la carte", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                }
+        // --- Localisation (ajout ET modification) ---
+        Spacer(Modifier.height(14.dp))
+        OutlinedButton(
+            onClick = { focusManager.clearFocus(); onGeocode(adresse, ville, gouvernorat) },
+            enabled = !geo.loading && !saving,
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            shape = RoundedCornerShape(14.dp)
+        ) {
+            if (geo.loading) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Localiser sur la carte", fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
-
-            geo.message?.let {
-                Spacer(Modifier.height(6.dp))
-                Text(it, color = if (geo.lat != null) TextMuted else RedClosed, fontSize = 12.sp)
-            }
-
-            Spacer(Modifier.height(8.dp))
-            PharmacieMapPicker(
-                focus = geo.focus,
-                onPositionChanged = onPositionChanged,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(260.dp)
-                    .border(1.dp, Color(0xFFE5EAF2), RoundedCornerShape(16.dp))
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                if (geo.lat != null && geo.lng != null)
-                    "Position validée : %.5f, %.5f".format(geo.lat, geo.lng)
-                else "Aucune position choisie : touchez la carte ou utilisez « Localiser »",
-                color = TextMuted, fontSize = 11.sp
-            )
         }
+
+        geo.message?.let {
+            Spacer(Modifier.height(6.dp))
+            Text(it, color = if (geo.lat != null) TextMuted else RedClosed, fontSize = 12.sp)
+        }
+
+// En modification, la carte démarre sur la position actuelle de la pharmacie
+        // En modification, la carte démarre sur la position actuelle (objet créé une seule fois)
+        val initialFocus = remember(initial?.id) {
+            initial?.let { MapFocus(it.latitude, it.longitude) }
+        }
+        val mapFocus = geo.focus ?: initialFocus
+        val shownLat = geo.lat ?: initial?.latitude
+        val shownLng = geo.lng ?: initial?.longitude
+
+        Spacer(Modifier.height(8.dp))
+        PharmacieMapPicker(
+            focus = mapFocus,
+            onPositionChanged = onPositionChanged,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(260.dp)
+                .border(1.dp, Color(0xFFE5EAF2), RoundedCornerShape(16.dp))
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            if (shownLat != null && shownLng != null)
+                "Position : %.5f, %.5f".format(shownLat, shownLng)
+            else "Aucune position choisie : touchez la carte ou utilisez « Localiser »",
+            color = TextMuted, fontSize = 11.sp
+        )
+
+
+
+
 
         error?.let {
             Spacer(Modifier.height(8.dp))

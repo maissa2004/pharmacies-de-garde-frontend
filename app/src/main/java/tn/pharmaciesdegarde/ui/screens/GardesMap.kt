@@ -17,6 +17,8 @@ import java.time.LocalDateTime
 import org.json.JSONArray
 import org.json.JSONObject
 import tn.pharmaciesdegarde.data.remote.GardeDto
+import tn.pharmaciesdegarde.viewmodel.UserLocation
+
 
 private class GardesMapBridge(private val onClick: (Long) -> Unit) {
     private val main = Handler(Looper.getMainLooper())
@@ -34,7 +36,9 @@ fun GardesMap(
     gardes: List<GardeDto>,
     now: LocalDateTime,
     onPharmacieClick: (Long) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    userLocation: UserLocation? = null,
+    focusIds: Set<Long>? = null
 ) {
     val latestClick by rememberUpdatedState(onPharmacieClick)
     var pageReady by remember { mutableStateOf(false) }
@@ -42,23 +46,31 @@ fun GardesMap(
 
     // Une pharmacie = un marqueur (vert si au moins une de ses gardes est en cours).
     // Le JSON sert de clé : la carte ne se recentre que si son contenu change vraiment.
-    val json = remember(gardes, now) {
-        val arr = JSONArray()
+    val json = remember(gardes, now, userLocation, focusIds) {        val points = JSONArray()
         gardes.groupBy { it.pharmacie.id }.forEach { (_, list) ->
             val p = list.first().pharmacie
             val lat = p.latitude?.toDouble()
             val lng = p.longitude?.toDouble()
             if (lat == null || lng == null || !lat.isFinite() || !lng.isFinite()) return@forEach
-            if (lat == 0.0 && lng == 0.0) return@forEach   // pharmacie jamais géolocalisée
-            arr.put(JSONObject().apply {
+            if (lat == 0.0 && lng == 0.0) return@forEach
+            points.put(JSONObject().apply {
                 put("id", p.id)
                 put("nom", p.nom)
                 put("lat", lat)
                 put("lng", lng)
                 put("ongoing", list.any { it.isOngoing(now) })
+                put("focus", focusIds == null || p.id in focusIds)   // <- ici
+                if (userLocation != null) {
+                    put("km", haversineKm(userLocation.lat, userLocation.lng, lat, lng))
+                }
             })
         }
-        arr.toString()
+        JSONObject().apply {
+            put("points", points)
+            if (userLocation != null) {
+                put("user", JSONObject().put("lat", userLocation.lat).put("lng", userLocation.lng))
+            }
+        }.toString()
     }
 
     AndroidView(
@@ -108,7 +120,6 @@ fun GardesMap(
     LaunchedEffect(json, pageReady, webView) {
         val wv = webView
         if (pageReady && wv != null) {
-            wv.evaluateJavascript("fixSize(); setPharmacies($json)", null)
-        }
+            wv.evaluateJavascript("fixSize(); setData($json)", null)        }
     }
 }

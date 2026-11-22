@@ -1,7 +1,10 @@
 @file:SuppressLint("NewApi")
 package tn.pharmaciesdegarde.ui.screens
 
+import android.Manifest
 import android.annotation.SuppressLint
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -17,6 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.LocalPharmacy
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
@@ -37,12 +41,14 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import tn.pharmaciesdegarde.R
 import tn.pharmaciesdegarde.data.remote.GardeDto
 import tn.pharmaciesdegarde.data.remote.TypeGarde
 import tn.pharmaciesdegarde.ui.theme.*
+import tn.pharmaciesdegarde.viewmodel.ALL_REGIONS
+import tn.pharmaciesdegarde.viewmodel.DEFAULT_REGION
 import tn.pharmaciesdegarde.viewmodel.GardesViewModel
-import androidx.compose.foundation.layout.height
 
 private val HOME_HOUR = DateTimeFormatter.ofPattern("HH:mm")
 private val HOME_DAY_HOUR = DateTimeFormatter.ofPattern("dd/MM HH:mm")
@@ -80,35 +86,84 @@ fun HomeScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var showRegions by rememberSaveable { mutableStateOf(false) }
     var filter by rememberSaveable { mutableStateOf(GardeFilter.ONGOING) }
+    var locating by remember { mutableStateOf(false) }
+    var locationMessage by remember { mutableStateOf<String?>(null) }
+
+    // Position de l'utilisateur (null tant qu'elle n'est pas connue)
+    val loc = state.userLocation
+    val nearMe = loc != null && state.gouvernorat == ALL_REGIONS
+    val regionLabel = if (state.gouvernorat == ALL_REGIONS) "Près de moi" else state.gouvernorat
+    val where = if (state.gouvernorat == ALL_REGIONS) "près de vous" else "à ${state.gouvernorat}"
+
+    // 1) récupère la position, 2) charge les gardes de toutes les régions
+    fun locate() {
+        scope.launch {
+            locating = true
+            locationMessage = null
+            val found = fetchLocation(context)
+            locating = false
+            if (found == null) {
+                locationMessage = "Position introuvable. Activez la localisation du téléphone puis réessayez."
+            } else {
+                viewModel.setUserLocation(found.latitude, found.longitude)
+                viewModel.selectRegion(ALL_REGIONS)
+            }
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { granted ->
+        if (granted.values.any { it }) locate()
+        else locationMessage = "Autorisez l'accès à la position pour voir les pharmacies les plus proches."
+    }
+
+    fun onNearMeClick() {
+        when {
+            nearMe -> {   // second appui : on désactive
+                viewModel.clearUserLocation()
+                viewModel.selectRegion(DEFAULT_REGION)
+            }
+            hasLocationPermission(context) -> locate()
+            else -> permissionLauncher.launch(
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+            )
+        }
+    }
 
     // L'heure est rafraîchie chaque minute : une garde terminée disparaît de la liste
     val now by produceState(LocalDateTime.now()) {
         while (true) { delay(60_000); value = LocalDateTime.now() }
     }
 
-    // Pharmacies ouvertes maintenant = gardes en cours
-    val open = remember(state.gardes, now) {
-        state.gardes.filter { it.isOngoing(now) }.sortedBy { it.pharmacie.nom }
+    // Pharmacies ouvertes maintenant : de la plus proche à la plus éloignée si la position est connue
+    val open = remember(state.gardes, now, loc) {
+        val list = state.gardes.filter { it.isOngoing(now) }
+        if (loc != null) list.sortedBy { it.distanceKm(loc) } else list.sortedBy { it.pharmacie.nom }
     }
-// Gardes d'aujourd'hui pas encore terminées : en cours + celles qui commencent plus tard
+    // Gardes d'aujourd'hui pas encore terminées : en cours + celles qui commencent plus tard
     val todayGardes = remember(state.gardes, now) {
         val endOfDay = now.toLocalDate().plusDays(1).atStartOfDay()
         state.gardes.filter { it.debut().isBefore(endOfDay) && it.fin().isAfter(now) }
     }
-    val later = remember(todayGardes, now) {
-        todayGardes.filter { !it.isOngoing(now) }.sortedBy { it.debut() }
+    val later = remember(todayGardes, now, loc) {
+        val list = todayGardes.filter { !it.isOngoing(now) }
+        if (loc != null) list.sortedBy { it.distanceKm(loc) } else list.sortedBy { it.debut() }
     }
     val filtered = when (filter) {
         GardeFilter.ONGOING -> open
         GardeFilter.LATER -> later
-        GardeFilter.ALL -> open + later
+        GardeFilter.ALL -> if (loc != null) (open + later).sortedBy { it.distanceKm(loc) } else open + later
     }
+    val mapGardes = remember(open, later) { open + later }
+    val focusIds = remember(filtered) { filtered.map { it.pharmacie.id }.toSet() }
+
     Scaffold(
         containerColor = BackgroundLight,
         topBar = {
-            // En-tête (Header)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -146,75 +201,69 @@ fun HomeScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Région (remplace la position écrite en dur)
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { showRegions = true },
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .background(PrimaryBlueSoft, RoundedCornerShape(10.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.Default.LocationOn, contentDescription = null,
-                            tint = PrimaryBlue, modifier = Modifier.size(16.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Votre région", color = TextMuted, fontSize = 10.sp)
-                        Text(
-                            state.gouvernorat, color = TextInk,
-                            fontSize = 12.sp, fontWeight = FontWeight.Bold
-                        )
-                    }
-                    Icon(
-                        Icons.Default.KeyboardArrowDown,
-                        contentDescription = "Changer de région", tint = TextMuted
-                    )
-                }
-            }
-
-            // Barre de recherche
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp)
-                        .background(Color.White, RoundedCornerShape(15.dp))
-                        .padding(horizontal = 12.dp),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Search, contentDescription = null, tint = TextMuted)
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text("Rechercher un médicament", color = TextMuted, fontSize = 12.sp)
-                    }
-                }
-            }
-
-            // Titre de section avec le vrai nombre de pharmacies ouvertes
+            // Contrôles : région + près de moi sur une seule ligne
             item {
                 Column {
-                    Text(
-                        "Pharmacies de garde · aujourd'hui",
-                        color = TextInk, fontSize = 14.sp, fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = if (state.loading) "Chargement…"
-                        else "${open.size} ouverte(s) en ce moment · ${todayGardes.size - open.size} plus tard · ${state.gouvernorat}",
-                        color = TextMuted, fontSize = 10.sp
-                    )
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Région
+                        Row(
+                            Modifier
+                                .weight(1f)
+                                .height(40.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(PrimaryBlueSoft)
+                                .clickable { showRegions = true }
+                                .padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.LocationOn, contentDescription = null,
+                                tint = PrimaryBlue, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                regionLabel, color = PrimaryBlue, fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold, maxLines = 1,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Changer de région",
+                                tint = PrimaryBlue, modifier = Modifier.size(18.dp))
+                        }
+
+                        // Près de moi
+                        Row(
+                            Modifier
+                                .height(40.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(if (nearMe) GreenPharmacy else Color.White)
+                                .border(1.dp, if (nearMe) GreenPharmacy else Color(0xFFE5EAF2), RoundedCornerShape(20.dp))
+                                .clickable(enabled = !locating) { onNearMeClick() }
+                                .padding(horizontal = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (locating) {
+                                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.MyLocation, contentDescription = null,
+                                    tint = if (nearMe) Color.White else PrimaryBlue,
+                                    modifier = Modifier.size(16.dp))
+                            }
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                if (nearMe) "Actif" else "Près de moi",
+                                color = if (nearMe) Color.White else PrimaryBlue,
+                                fontSize = 12.sp, fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    locationMessage?.let {
+                        Text(it, color = RedClosed, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                    }
                 }
             }
 
-            // Carte des pharmacies de garde en ce moment
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     StatusChip("En cours (${open.size})", filter == GardeFilter.ONGOING, GreenPharmacy) {
@@ -229,18 +278,20 @@ fun HomeScreen(
                 }
             }
 
+            // Carte des pharmacies de garde
             item {
                 GardesMap(
-                    gardes = filtered,
-                    now = now,
+                    gardes = mapGardes,
+                    focusIds = focusIds,                    now = now,
+                    userLocation = loc,
                     onPharmacieClick = onPharmacieClick,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(220.dp)
+                        .height(170.dp)
                 )
             }
 
-            // Liste des pharmacies ouvertes maintenant
+            // Liste
             when {
                 state.loading -> item {
                     Box(Modifier.fillMaxWidth().padding(24.dp), Alignment.Center) {
@@ -259,9 +310,9 @@ fun HomeScreen(
                 filtered.isEmpty() -> item {
                     Text(
                         when (filter) {
-                            GardeFilter.ONGOING -> "Aucune pharmacie de garde en ce moment à ${state.gouvernorat}."
-                            GardeFilter.LATER -> "Aucune autre garde prévue aujourd'hui à ${state.gouvernorat}."
-                            GardeFilter.ALL -> "Aucune garde aujourd'hui à ${state.gouvernorat}."
+                            GardeFilter.ONGOING -> "Aucune pharmacie de garde en ce moment $where."
+                            GardeFilter.LATER -> "Aucune autre garde prévue aujourd'hui $where."
+                            GardeFilter.ALL -> "Aucune garde aujourd'hui $where."
                         },
                         color = TextMuted, fontSize = 13.sp,
                         modifier = Modifier.padding(vertical = 8.dp)
@@ -272,6 +323,7 @@ fun HomeScreen(
                         g = g,
                         today = now.toLocalDate(),
                         ongoing = g.isOngoing(now),
+                        distance = loc?.let { formatDistance(g.distanceKm(it)) },
                         onClick = { onPharmacieClick(g.pharmacie.id) },
                         onDirections = { openInMaps(context, g.pharmacie) }
                     )
@@ -298,12 +350,13 @@ fun HomeScreen(
     }
 }
 
-// Carte d'une pharmacie ouverte : un clic ouvre la fiche, « Itinéraire » ouvre la carte
+// Carte d'une pharmacie : un clic ouvre la fiche, « Itinéraire » ouvre la carte
 @Composable
 private fun OpenGardeCard(
     g: GardeDto,
     today: LocalDate,
     ongoing: Boolean,
+    distance: String?,
     onClick: () -> Unit,
     onDirections: () -> Unit
 ) {
@@ -339,11 +392,15 @@ private fun OpenGardeCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         Icons.Default.LocationOn, contentDescription = null,
-                        tint = TextMuted, modifier = Modifier.size(12.dp)
+                        tint = if (distance != null) PrimaryBlue else TextMuted,
+                        modifier = Modifier.size(12.dp)
                     )
                     Spacer(Modifier.width(4.dp))
                     Text(
-                        "${g.pharmacie.adresse} · ${g.pharmacie.ville}",
+                        buildString {
+                            if (distance != null) append("$distance · ")
+                            append("${g.pharmacie.adresse} · ${g.pharmacie.ville}")
+                        },
                         color = TextMuted, fontSize = 11.sp
                     )
                 }

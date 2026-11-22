@@ -154,21 +154,27 @@ class PharmaciesViewModel @Inject constructor(
     fun clearFormError() { _state.value = _state.value.copy(formError = null) }
 
 
-    fun update(id: Long, nom: String, adresse: String, telephone: String, onSuccess: () -> Unit) {
+    fun update(
+        id: Long, nom: String, adresse: String, telephone: String,
+        lat: Double?, lng: Double?, onSuccess: () -> Unit
+    ) {
         if (nom.isBlank() || adresse.isBlank() || telephone.isBlank()) {
-            _state.value = _state.value.copy(formError = "Remplissez tous les champs"); return
+            _state.update { it.copy(formError = "Remplissez tous les champs") }; return
         }
         viewModelScope.launch {
-            _state.value = _state.value.copy(saving = true, formError = null)
-            repo.update(id, nom, adresse, telephone)
+            _state.update { it.copy(saving = true, formError = null) }
+            repo.update(id, nom, adresse, telephone, lat, lng)
                 .onSuccess { updated ->
-                    _state.value = _state.value.copy(
-                        saving = false,
-                        pharmacies = _state.value.pharmacies.map { if (it.id == updated.id) updated else it }
-                    )
+                    _state.update {
+                        it.copy(
+                            saving = false,
+                            pharmacies = it.pharmacies.map { p -> if (p.id == updated.id) updated else p },
+                            geo = GeoState()
+                        )
+                    }
                     onSuccess()
                 }
-                .onFailure { _state.value = _state.value.copy(saving = false, formError = it.message) }
+                .onFailure { e -> _state.update { it.copy(saving = false, formError = e.message) } }
         }
     }
 
