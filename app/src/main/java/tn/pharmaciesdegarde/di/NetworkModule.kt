@@ -21,7 +21,7 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
 
-    private const val BASE_URL = "http://192.168.1.20:8081/api/"
+    private const val BASE_URL = "http://172.16.24.102:8081/api/"
     @Provides
     @Singleton
     fun provideJson(): Json = Json { ignoreUnknownKeys = true; isLenient = true }
